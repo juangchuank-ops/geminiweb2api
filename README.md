@@ -295,7 +295,7 @@ x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,
 
 ### 流式解析
 
-响应是一段 `)]}'` 反 CSRF 前缀 + **UTF-16 code unit 长度前缀分帧**：
+响应是一段 `)]}'` 反 CSRF 前缀 + **长度前缀分帧**：
 
 ```
 )]}'
@@ -304,7 +304,7 @@ x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,
 [["wrb.fr","<rpcid>","<JSON 字符串>"]]
 ```
 
-长度前缀按 **UTF-16 code unit** 计，不是字节数——中文一个字算 1 而不是 3。前缀可能跨 chunk 断裂，所以解析器是增量的。
+长度前缀是 `<数字>\n<载荷>` 重复。**这个前缀不能全信**——见下。
 
 内层 JSON 的取值路径：
 
@@ -315,6 +315,28 @@ x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,
 | `candidate[1][0]` | **累积正文**（注意是累积的，要自己算增量） |
 | `candidate[37][0][0]` | 思考内容 |
 | `candidate[8][0] == 2` | 这一轮结束 |
+
+#### 长度前缀只当提示，不当事实
+
+这是本项目踩过最隐蔽的一个坑。
+
+最初解析器按「UTF-16 code unit」推进，并且有一条测试专门钉住这个假设。问题是**那条测试的 fixture 是用被测的同一个函数生成的**（`buildStream` 里写 `UTF16Len(payload)`），所以它只能证明解析器和自己的假设自洽，永远无法证伪单位到底是什么。真实抓包一进来就露馅：声明长度不落在帧边界上，解析器第一帧就错位，之后**再也找不到任何一帧**——表现为「空回答」，不是报错。
+
+有个纯算术事实能把范围收窄：对任意 UTF-8 字符串，`UTF16Len(s) ≤ len(s)` 恒成立（BMP 字符 ≥1 字节记 1 单位；astral 字符 4 字节记 2 单位）。所以按单位推进**只会落短，不可能越过载荷尾部**。既然观察到的是「多算」，那它计的就**不是** UTF-16 单位——多半把某个分隔符也算进去了。
+
+与其去猜单位，不如不信它。两个独立实现早就得出了同一结论：
+
+- `tmc/nlm`：*"the exact counting varies. Instead of trusting the length values, extract JSON arrays directly by finding balanced brackets"*
+- `zexadev/gemini-web2api-go`：逐行扫，`strings.Contains(line, "wrb.fr")` 之后直接 `json.Unmarshal`，**完全没有长度前缀算术**
+
+所以这里的做法是：**长度前缀当快路，边界对不上就按载荷自身的括号配平重新切**。
+
+1. 读出声明长度，算出候选边界
+2. 校验边界：其后必须是「空白 + 数字 + 换行」（下一帧的长度标记）。**空剩余算校验失败**——流中途「什么都没有」分不清是「帧正好结束」还是「下一个字节还没到」，把它当成合法边界正是让偏小的声明长度截掉帧尾、静默丢帧的原因
+3. 校验不过 → 从载荷开头的 `[` 做括号配平（会跳过字符串字面量与转义，所以代码和正文里的 `]` 不会提前结束帧）重新定位
+4. 结构也找不到 → **等更多字节**，绝不按一个刚校验失败的声明长度硬切。这一点是修这个 bug 时自己踩进去的：第一版兜底会在帧还差最后一个字节时「按长度完成」它，等于把帧整个吃掉
+
+`FrameParser.Resyncs()` 会统计有多少帧走了结构化兜底。非零不是错误，但**每一帧都在重同步**就说明上游又改计数方式了，快路已经名存实亡。
 | `candidate[12]` | 富内容（媒体，图片在这里） |
 
 ### 错误码
@@ -435,7 +457,7 @@ backend/
   internal/gemini/      上游协议客户端
                         client.go    初始化 / 生成 / 媒体
                         payload.go   81 槽位 payload 构造
-                        frame.go     UTF-16 长度前缀分帧解析
+                        frame.go     长度前缀分帧 + 括号配平兜底
                         models.go    模型目录 + 模型请求头
                         cookie.go    Cookie jar（保序解析与回放）
                         rotate.go    RotateCookies
@@ -492,13 +514,13 @@ go vet ./...
 | --- | --- |
 | `internal/store` | 配置快照的并发读写、写锁内重入读配置（死锁回归）、快照隔离、**从 Cookie 自动派生账号身份**、重复 PSID 拒绝、**响应里永不出现原始 Cookie**、内置模型目录与客户端目录一致 |
 | `internal/pool` | 账号筛选（禁用/失效/冷却过期）、**Cookie 账号才要求 PSID、游客不要求**、PSID 被清空后不可调度、四种调度策略、粘性会话、退避与封顶 |
-| `internal/gemini` | payload 槽位构造与思考深度、模型请求头的两处一致性、**UTF-16 长度前缀分帧**（含中文与跨 chunk 断裂）、`)]}'` 前缀处理、`BardErrorInfo` 分类（含解码后 payload 里的 `["BardErrorInfo",[1037]]` 形式）、Cookie jar 的保序解析、模型目录完整性 |
+| `internal/gemini` | payload 槽位构造与思考深度、模型请求头的两处一致性、**长度前缀分帧 + 括号配平兜底**（声明长度偏大/偏小/按字节计都能恢复，含跨 chunk 断裂）、`)]}'` 前缀处理、`BardErrorInfo` 分类（含解码后 payload 里的 `["BardErrorInfo",[1037]]` 形式）、Cookie jar 的保序解析、模型目录完整性 |
 | `internal/refresher` | 到期判定、**失败也写 `RefreshAt`**、**限流不计入退役**、401 达阈值才退役、成功清零失败计数、游客跳过而非失败、单账号刷新、**同一时刻只跑一次扫描**、扫描按间隔串行 |
 | `internal/admin` | 从粘贴里读出凭据、标签不是凭据、拒绝不可用的 Cookie、换 Cookie 会重置续期记录、导入的各种形状、设置接口逐字段与 struct 的 json tag 比对、**刷新路由的状态码契约**（被拒必须 502 且带原因、限流必须是 200）、**游客探测不会把自己弄退役** |
 | `internal/config` | 旧默认值迁移、迁移不误伤刻意的覆盖值 |
 | `internal/gateway` | 端到端请求路径——鉴权、限流、故障转移、OpenAI 响应格式、流式、**累积文本不重复**、思考模式不发模型头、`reasoning_effort` 落到 payload、配额用尽触发冷却、build label 过期重试一次、审计、图像 |
 
-> `internal/gateway` 的测试用 `httptest` 顶替上游，并且桩说的是**真实的 batchexecute 协议**（真的 `)]}'` 前缀、真的 UTF-16 长度前缀、真的 `BardErrorInfo` 帧），因此不需要真实 Cookie 就能覆盖完整链路。
+> `internal/gateway` 的测试用 `httptest` 顶替上游，并且桩说的是**真实的 batchexecute 协议**（真的 `)]}'` 前缀、真的长度前缀分帧、真的 `BardErrorInfo` 帧），因此不需要真实 Cookie 就能覆盖完整链路。
 
 端到端：
 
@@ -649,6 +671,14 @@ location / {
 **Q：提示「缺少 __Secure-1PSID」？**
 
 你只复制了 `__Secure-1PSIDTS`。它不是会话本身，单独一条不能认证。回到 `Application → Cookies`，把 `__Secure-1PSID` 一起复制。
+
+**Q：请求返回 200，但正文是空的？**
+
+先看日志里有没有 `frame resync` 之类的重同步计数。空正文几乎总是**分帧解析错位**，不是账号问题——解析器一旦错位就再也找不到帧，于是「成功但没内容」。详见[流式解析](#长度前缀只当提示不当事实)：声明长度只是提示，边界对不上会按括号配平恢复。如果每一帧都在重同步，说明上游又换了计数方式，去 `frame.go` 更新 `frameBoundaryOK` 的判据。
+
+**Q：中文回复出问题，英文正常？**
+
+同一类症状的强信号。字节数与 UTF-16 单位数只在非 ASCII 文本上分叉，所以「英文好的、中文空的」基本可以定位到分帧或长度计算。
 
 **Q：`upstream.baseURL` 里要不要带 `/app`？**
 

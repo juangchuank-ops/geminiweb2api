@@ -26,17 +26,32 @@ const xssiPrefix = ")]}'"
 
 // FrameParser incrementally decodes the length-prefixed batchexecute stream.
 //
-// The framing is `<length>\n<payload>` repeated, where length counts UTF-16
-// code units — JavaScript string length, not bytes. Treating it as bytes works
-// for ASCII and silently desynchronises the moment a reply contains an emoji or
-// any CJK character outside the BMP, which is exactly what happens in practice.
+// The framing is `<length>\n<payload>` repeated. The declared length is used as
+// a fast path, but it is *not* trusted blindly — see Feed.
+//
+// Why the distrust: the unit the upstream counts in is not stable, and at least
+// two independent implementations gave up on it (tmc/nlm: "the exact counting
+// varies. Instead of trusting the length values, extract JSON arrays directly
+// by finding balanced brackets"; zexadev/gemini-web2api-go scans line by line
+// and never reads the length at all). When the declared length is wrong the
+// parser desynchronises once and then reports *zero* frames for the rest of the
+// stream, which surfaces as an empty answer rather than an error.
 type FrameParser struct {
 	buf     strings.Builder
 	rest    string // buffered text not yet consumed
 	started bool   // XSSI prefix already handled
 	length  int    // expected UTF-16 length of the frame being assembled
 	haveLen bool
+	resyncs int // frames whose declared length was rejected and rebuilt structurally
 }
+
+// Resyncs reports how many frames had to be recovered structurally because the
+// declared length did not land on a frame boundary.
+//
+// Non-zero is not an error — it is the parser doing its job — but a stream that
+// resyncs on *every* frame is telling you the upstream changed its counting
+// again, and the fast path is now dead weight.
+func (p *FrameParser) Resyncs() int { return p.resyncs }
 
 // NewFrameParser returns a parser ready to consume a stream.
 func NewFrameParser() *FrameParser {
@@ -90,8 +105,30 @@ func (p *FrameParser) Feed(chunk string) []Frame {
 		}
 
 		consumed, ok := utf16PrefixBytes(p.rest, p.length)
-		if !ok {
-			break
+		if !ok || !frameBoundaryOK(p.rest[consumed:]) {
+			// The declared length did not land on a frame boundary, so it is
+			// not telling us where this frame ends. Rebuild the boundary from
+			// the payload's own structure instead: the payload is a JSON array,
+			// so its extent is knowable exactly, and unlike the length it
+			// cannot be wrong.
+			end, found := balancedArrayEnd(p.rest)
+			if !found {
+				// Either the frame is still arriving, or this frame is not
+				// JSON at all.
+				//
+				// Do NOT fall back to consuming the declared length here. That
+				// was the first version of this fix, and it reintroduced the
+				// very bug it was meant to cure: while a frame is still
+				// streaming in, the length "completes" it one byte early, the
+				// structure is not closed yet, and consuming on the strength of
+				// a length that just failed its boundary check eats the frame
+				// whole. Waiting is always safe — the caller feeds more bytes.
+				break
+			}
+			if consumed != end {
+				p.resyncs++
+			}
+			consumed = end
 		}
 		payload := p.rest[:consumed]
 		p.rest = p.rest[consumed:]
@@ -147,6 +184,77 @@ func decodeFrame(payload string) []Frame {
 		out = append(out, frame)
 	}
 	return out
+}
+
+// frameBoundaryOK reports whether rest begins where the next frame begins:
+// optional whitespace, then the next length marker, then its newline.
+//
+// An empty or whitespace-only rest is deliberately reported as *not* OK. Mid
+// stream, "nothing left" is ambiguous — it means either the frame ended exactly
+// here or the buffer simply has not received the next byte yet — and treating it
+// as a valid boundary is what let an under-declared length truncate a frame by
+// its last byte and drop it silently. Callers that reach the true end of the
+// stream are served by the structural path instead, which does not need to
+// guess.
+func frameBoundaryOK(rest string) bool {
+	i := 0
+	for i < len(rest) && (rest[i] == '\n' || rest[i] == '\r' || rest[i] == ' ' || rest[i] == '\t') {
+		i++
+	}
+	if i >= len(rest) {
+		return false
+	}
+	digits := 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+		i++
+		digits++
+	}
+	return digits > 0 && i < len(rest) && rest[i] == '\n'
+}
+
+// balancedArrayEnd returns the offset just past the first balanced top-level
+// JSON array in s.
+//
+// It walks string literals and escapes rather than counting brackets naively:
+// payloads are full of code and prose, so a `]` inside a string is routine and
+// would otherwise end the frame early.
+//
+// found is false when the array is not closed yet, which for a stream means
+// "keep buffering" — the caller must not treat it as a malformed frame.
+func balancedArrayEnd(s string) (end int, found bool) {
+	start := strings.IndexByte(s, '[')
+	if start < 0 {
+		return 0, false
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return i + 1, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // utf16PrefixBytes returns the number of bytes of s that make up the first n

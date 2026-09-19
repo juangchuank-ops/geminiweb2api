@@ -18,6 +18,29 @@ func buildStream(payloads ...string) string {
 	return b.String()
 }
 
+// buildStreamDeclaring renders a stream whose declared lengths come from
+// declared(payload) rather than from UTF16Len.
+//
+// This helper exists because buildStream cannot falsify anything: it derives the
+// length from UTF16Len, the very function the parser uses, so the fixture and
+// the parser share one assumption and can only ever agree with each other. A
+// real capture disagreed with both — the declared length did not land on a frame
+// boundary, the parser desynchronised at the first frame, and every subsequent
+// request came back with an empty answer while the tests stayed green.
+//
+// The frames are newline-terminated here, which is what the upstream emits and
+// what makes an over-long declared length visible: the parser consumes the
+// newline and then bites into the *next* length marker.
+func buildStreamDeclaring(declared func(string) int, payloads ...string) string {
+	var b strings.Builder
+	b.WriteString(xssiPrefix)
+	b.WriteString("\n")
+	for _, payload := range payloads {
+		fmt.Fprintf(&b, "%d\n%s\n", declared(payload), payload)
+	}
+	return b.String()
+}
+
 func TestFrameParserBasic(t *testing.T) {
 	payload := `[["wrb.fr",null,"{\"a\":1}"]]`
 	stream := buildStream(payload)
@@ -124,6 +147,171 @@ func TestFrameParserIgnoresNoiseBetweenFrames(t *testing.T) {
 	frames := NewFrameParser().Feed(stream)
 	if len(frames) != 1 {
 		t.Fatalf("got %d frames, want 1", len(frames))
+	}
+}
+
+// TestFrameParserRecoversFromAWrongDeclaredLength is the test the file was
+// missing.
+//
+// A real capture declared a length that did not land on a frame boundary. The
+// parser consumed past the end of the first frame, bit into the next length
+// marker, and from then on found no frames at all — the request came back with
+// an empty answer, not an error, so nothing upstream of the parser noticed. The
+// only reason it was found at all is that someone counted frames by hand.
+//
+// The declared length is therefore treated as a hint, not as truth: if it does
+// not land on a boundary, the frame is rebuilt from the payload's own brackets.
+func TestFrameParserRecoversFromAWrongDeclaredLength(t *testing.T) {
+	payloads := []string{
+		`[["wrb.fr",null,"{\"step\":1}"]]`,
+		`[["wrb.fr",null,"{\"step\":2}"]]`,
+		`[["wrb.fr",null,"{\"step\":3}"]]`,
+	}
+
+	for _, delta := range []int{-5, -2, -1, 0, 1, 2, 5} {
+		delta := delta
+		t.Run(fmt.Sprintf("delta%+d", delta), func(t *testing.T) {
+			stream := buildStreamDeclaring(func(p string) int { return UTF16Len(p) + delta }, payloads...)
+
+			parser := NewFrameParser()
+			var frames []Frame
+			// Feed byte by byte as well: the recovery has to work while the
+			// stream is still arriving, not only on a complete body.
+			for i := 0; i < len(stream); i++ {
+				frames = append(frames, parser.Feed(stream[i:i+1])...)
+			}
+
+			if len(frames) != len(payloads) {
+				t.Fatalf("got %d frames, want %d (delta %+d desynchronised the parser)",
+					len(frames), len(payloads), delta)
+			}
+			for i, frame := range frames {
+				want := fmt.Sprintf(`{"step":%d}`, i+1)
+				if frame.Payload != want {
+					t.Errorf("frame %d payload = %q, want %q", i, frame.Payload, want)
+				}
+			}
+		})
+	}
+}
+
+// TestFrameParserRecoversWhenTheLengthIsCountedInBytes covers the specific
+// mismatch that a Chinese-language reply hits and an English one does not.
+//
+// If the upstream declares the payload's *byte* length while the parser advances
+// in UTF-16 units, the two agree only while the text is ASCII. Each CJK
+// character is 3 bytes but 1 unit, so the parser runs past the end of the frame
+// by two bytes per character — and the failure is silent.
+func TestFrameParserRecoversWhenTheLengthIsCountedInBytes(t *testing.T) {
+	payloads := []string{
+		`[["wrb.fr",null,"{\"t\":\"你好世界\"}"]]`,
+		`[["wrb.fr",null,"{\"t\":\"再见\"}"]]`,
+	}
+
+	stream := buildStreamDeclaring(func(p string) int { return len(p) }, payloads...)
+
+	parser := NewFrameParser()
+	frames := parser.Feed(stream)
+	if len(frames) != len(payloads) {
+		t.Fatalf("got %d frames, want %d", len(frames), len(payloads))
+	}
+	if !strings.Contains(frames[0].Payload, "你好世界") {
+		t.Errorf("payload lost its non-ASCII content: %q", frames[0].Payload)
+	}
+	if !strings.Contains(frames[1].Payload, "再见") {
+		t.Errorf("second frame payload = %q", frames[1].Payload)
+	}
+	if parser.Resyncs() == 0 {
+		t.Error("expected the structural path to have been used, but no resync was counted")
+	}
+}
+
+// TestFrameParserRecoversFromAnAbsurdLength pins the case where the declared
+// length is larger than the whole buffer: the parser must fall through to the
+// structure instead of waiting forever for bytes that will never satisfy it.
+func TestFrameParserRecoversFromAnAbsurdLength(t *testing.T) {
+	stream := buildStreamDeclaring(func(string) int { return 999999 },
+		`[["wrb.fr",null,"{\"ok\":1}"]]`)
+
+	frames := NewFrameParser().Feed(stream)
+	if len(frames) != 1 {
+		t.Fatalf("got %d frames, want 1 — an unsatisfiable length stalled the parser", len(frames))
+	}
+	if frames[0].Payload != `{"ok":1}` {
+		t.Errorf("payload = %q", frames[0].Payload)
+	}
+}
+
+// TestFrameParserDoesNotResyncOnAWellFormedStream keeps the fast path honest.
+//
+// The recovery must not become the normal path: a parser that always rebuilds
+// boundaries structurally would pass every test above while quietly ignoring the
+// length prefix altogether.
+func TestFrameParserDoesNotResyncOnAWellFormedStream(t *testing.T) {
+	parser := NewFrameParser()
+	frames := parser.Feed(buildStream(
+		`[["wrb.fr",null,"{\"a\":1}"]]`,
+		`[["wrb.fr",null,"{\"t\":\"你好\"}"]]`,
+		`[["wrb.fr",null,"{\"b\":2}"]]`,
+	))
+	if len(frames) != 3 {
+		t.Fatalf("got %d frames, want 3", len(frames))
+	}
+	if parser.Resyncs() != 0 {
+		t.Errorf("Resyncs() = %d on a well-formed stream, want 0", parser.Resyncs())
+	}
+}
+
+func TestBalancedArrayEnd(t *testing.T) {
+	cases := []struct {
+		name  string
+		in    string
+		want  int
+		found bool
+	}{
+		{"plain", `[["wrb.fr",null,"{}"]]`, 22, true},
+		{"nested", `[[1,[2,[3]]],4]`, 15, true},
+		// A `]` inside a string must not close the frame early. Payloads are
+		// full of code and prose, so this is routine rather than exotic.
+		{"bracket inside string", `[["a","]"],["b"]]`, 17, true},
+		{"escaped quote then bracket", `[["a","\"]"]]`, 13, true},
+		{"escaped backslash before quote", `[["a","\\"]]`, 12, true},
+		{"leading whitespace", "\n  [1]", 6, true},
+		{"incomplete", `[["wrb.fr",null,"{}"`, 0, false},
+		{"unclosed string", `[["a","b]`, 0, false},
+		{"no bracket", "just text", 0, false},
+		{"empty", "", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, found := balancedArrayEnd(tc.in)
+			if found != tc.found || got != tc.want {
+				t.Errorf("balancedArrayEnd(%q) = (%d, %v), want (%d, %v)",
+					tc.in, got, found, tc.want, tc.found)
+			}
+		})
+	}
+}
+
+func TestFrameBoundaryOK(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},       // ambiguous mid-stream: not confirmable
+		{"\n", false},     // trailing newline only: same
+		{"  \n\t", false}, // trailing whitespace only: same
+		{"123\n[[", true}, // the next length marker
+		{"\n\n456\n[[", true},
+		{"abc", false},   // mid-payload
+		{"123", false},   // a length with no newline yet
+		{"12a\n", false}, // digits then something else
+		{"{}\n", false},  // payload tail
+	}
+	for _, tc := range cases {
+		if got := frameBoundaryOK(tc.in); got != tc.want {
+			t.Errorf("frameBoundaryOK(%q) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }
 
