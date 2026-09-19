@@ -156,7 +156,15 @@ def scan_blob(blob: bytes, label: str):
                 subject = match.group(value_group) if value_group else match.group(0)
                 if is_placeholder(subject):
                     continue
-            yield name, label, redact(match.group(0))
+            # The line number is not cosmetic. Without it the report shows only
+            # the *redacted full match*, whose length is the match's, not the
+            # captured value's -- so anyone trying to locate the hit has to
+            # guess, and guesses wrong. That happened for real: a 23-character
+            # preview was read as the `AO-x_abc123:1700000000` fixture when the
+            # actual hit was `AccessToken: "AO-token"`, forty lines away in the
+            # same file. A report you cannot act on is a report you misread.
+            line = blob.count(b"\n", 0, match.start()) + 1
+            yield name, label, line, redact(match.group(0))
 
 
 def worktree_files():
@@ -245,8 +253,8 @@ def main() -> int:
         return 0
 
     print(f"\n{len(unique)} match(es) - redacted, review each one:\n")
-    for name, where, sample in unique:
-        print(f"  [{name}] {where}\n      {sample}")
+    for name, where, line, sample in unique:
+        print(f"  [{name}] {where}:{line}\n      {sample}")
 
     print(
         "\nA match is not proof. Hand-built test tokens and documentation\n"
