@@ -202,7 +202,7 @@ func TestBuildAccountHonoursExplicitFields(t *testing.T) {
 	authUser := 3
 	account, err := buildAccount(accountPayload{
 		Name: "  主号  ", Cookie: testCookie("abc"), Identifier: "my-label",
-		AuthUser: &authUser, Model: "gemini-pro", BaseURL: "https://mirror.example",
+		AuthUser: &authUser, Model: "gemini-3.1-pro", BaseURL: "https://mirror.example",
 		Group: "team-a", Remark: "  备用  ",
 		Priority: 999, MaxConcurrent: 9999, Enabled: &disabled,
 	})
@@ -219,7 +219,7 @@ func TestBuildAccountHonoursExplicitFields(t *testing.T) {
 	if account.AuthUser != 3 {
 		t.Fatalf("authUser = %d", account.AuthUser)
 	}
-	if account.Model != "gemini-pro" || account.BaseURL != "https://mirror.example" {
+	if account.Model != "gemini-3.1-pro" || account.BaseURL != "https://mirror.example" {
 		t.Fatalf("model/baseURL not honoured: %+v", account)
 	}
 	if account.Group != "team-a" || account.Remark != "备用" {

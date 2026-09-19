@@ -128,7 +128,7 @@ func (g *Gateway) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// console's catalogue is keyed on the ids the *client* understands. Asking
 	// the store directly would reject every name the alias table exists to
 	// accept — `gpt-4o`, `gemini-2.5-pro`, `deepseek-reasoner` — and refusing
-	// those while /v1/models advertises gemini-flash is the most common way a
+	// those while /v1/models advertises gemini-3.8-flash is the most common way a
 	// 2api appears broken for a reason the operator cannot see.
 	requested := strings.TrimSpace(request.Model)
 	spec, understood := gemini.ResolveModel(requested)

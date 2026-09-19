@@ -208,7 +208,7 @@ export function SettingsPage() {
             <Input
               className="font-mono text-[11px]"
               value={draft.defaultModel}
-              placeholder="gemini-flash"
+              placeholder="gemini-3.8-flash"
               onChange={(event) => set("defaultModel", event.target.value)}
             />
           </Field>

@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildInnerSlots(t *testing.T) {
-	spec, _ := ResolveModel("gemini-flash")
+	spec, _ := ResolveModel("gemini-3.8-flash")
 	inner := buildInner("hello", "en", spec, 0, nil, nil)
 
 	if len(inner) != innerSlots {
@@ -42,7 +42,7 @@ func TestBuildInnerSlots(t *testing.T) {
 }
 
 func TestBuildInnerKeepsConversationMetadata(t *testing.T) {
-	spec, _ := ResolveModel("gemini-flash")
+	spec, _ := ResolveModel("gemini-3.8-flash")
 	metadata := []any{"c_abc", "r_def", "rc_ghi", nil, nil, nil, nil, nil, nil, ""}
 	inner := buildInner("again", "en", spec, 0, metadata, nil)
 
@@ -56,7 +56,7 @@ func TestBuildInnerKeepsConversationMetadata(t *testing.T) {
 }
 
 func TestOuterPayloadShape(t *testing.T) {
-	spec, _ := ResolveModel("gemini-flash")
+	spec, _ := ResolveModel("gemini-3.8-flash")
 	inner := buildInner("hi", "en", spec, 0, nil, nil)
 
 	body, err := outerPayload(inner, "AT-TOKEN")
@@ -214,10 +214,10 @@ func TestCleanArtifacts(t *testing.T) {
 }
 
 func TestModelHeaderShape(t *testing.T) {
-	spec, _ := ResolveModel("gemini-flash")
+	spec, _ := ResolveModel("gemini-3.8-flash")
 	header, ok := modelHeader(spec, "SESSION-ID")
 	if !ok {
-		t.Fatal("gemini-flash has a known upstream id and must produce a header")
+		t.Fatal("gemini-3.8-flash has a known upstream id and must produce a header")
 	}
 
 	if !strings.Contains(header, `"`+spec.Upstream+`"`) {
@@ -254,9 +254,9 @@ func TestModelHeaderShape(t *testing.T) {
 // accepted and routed by the mode number, so a mode whose id is unknown must
 // produce no header rather than an invented one.
 func TestModelHeaderIsOmittedWithoutAnUpstreamID(t *testing.T) {
-	spec, ok := LookupModel("gemini-flash-thinking")
+	spec, ok := LookupModel("gemini-3.8-flash-thinking")
 	if !ok {
-		t.Fatal("gemini-flash-thinking should be in the catalogue")
+		t.Fatal("gemini-3.8-flash-thinking should be in the catalogue")
 	}
 	if spec.Upstream != "" {
 		t.Fatalf("fixture changed: %q now has an upstream id", spec.ID)

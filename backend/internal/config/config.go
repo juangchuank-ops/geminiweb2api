@@ -169,7 +169,7 @@ func DefaultSettings(dataDir string) Settings {
 		Upstream: UpstreamSettings{
 			BaseURL:              "https://gemini.google.com",
 			Language:             "en",
-			DefaultModel:         "gemini-flash",
+			DefaultModel:         "gemini-3.8-flash",
 			RequestTimeoutSec:    300,
 			StreamIdleTimeoutSec: 120,
 			Proxy:                "",

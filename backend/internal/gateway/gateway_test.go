@@ -343,7 +343,7 @@ func sseDataLines(t *testing.T, rec *httptest.ResponseRecorder) []string {
 
 func TestChatCompletionsRequiresClientKey(t *testing.T) {
 	h := newHarness(t)
-	rec := h.chat(t, map[string]any{"model": "gemini-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}, "")
+	rec := h.chat(t, map[string]any{"model": "gemini-3.8-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}, "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
@@ -354,7 +354,7 @@ func TestChatCompletionsRequiresClientKey(t *testing.T) {
 
 func TestChatCompletionsRejectsUnknownKey(t *testing.T) {
 	h := newHarness(t)
-	rec := h.chat(t, map[string]any{"model": "gemini-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}, "sk-gm-wrong")
+	rec := h.chat(t, map[string]any{"model": "gemini-3.8-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}, "sk-gm-wrong")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
@@ -396,7 +396,7 @@ func TestChatCompletionsAcceptsAliases(t *testing.T) {
 		return [][]any{turnPayload("别名可用", "", true)}
 	}
 
-	for _, alias := range []string{"gpt-4o", "claude-3-5-sonnet", "gemini-2.5-pro", "google/gemini-flash"} {
+	for _, alias := range []string{"gpt-4o", "claude-3-5-sonnet", "gemini-2.5-pro", "google/gemini-3.8-flash"} {
 		t.Run(alias, func(t *testing.T) {
 			// The response echoes the catalogue id that actually ran, not the
 			// alias, because that is what /v1/models advertises.
@@ -428,7 +428,7 @@ func TestChatCompletionsSpeaksTheRealProtocol(t *testing.T) {
 		return [][]any{turnPayload("协议正确", "", true)}
 	}
 
-	h.ask(t, "gemini-flash", nil)
+	h.ask(t, "gemini-3.8-flash", nil)
 
 	calls := h.upstream.generations
 	if len(calls) != 1 {
@@ -494,7 +494,7 @@ func TestThinkingModeSendsNoModelHeader(t *testing.T) {
 		return [][]any{turnPayload("答案", "先想一下", true)}
 	}
 
-	h.ask(t, "gemini-flash-thinking", nil)
+	h.ask(t, "gemini-3.8-flash-thinking", nil)
 
 	calls := h.upstream.generations
 	if len(calls) != 1 {
@@ -531,7 +531,7 @@ func TestReasoningEffortReachesThePayload(t *testing.T) {
 		return [][]any{turnPayload("好", "", true)}
 	}
 
-	h.ask(t, "gemini-flash", map[string]any{"reasoning_effort": "high"})
+	h.ask(t, "gemini-3.8-flash", map[string]any{"reasoning_effort": "high"})
 
 	if len(h.upstream.generations) != 1 {
 		t.Fatalf("generation calls = %d, want 1", len(h.upstream.generations))
@@ -559,12 +559,12 @@ func TestChatCompletionsReturnsOpenAIResponse(t *testing.T) {
 		return [][]any{turnPayload("你好，世界", "", true)}
 	}
 
-	payload := h.ask(t, "gemini-flash", nil)
+	payload := h.ask(t, "gemini-3.8-flash", nil)
 
 	if payload["object"] != "chat.completion" {
 		t.Fatalf("object = %v", payload["object"])
 	}
-	if payload["model"] != "gemini-flash" {
+	if payload["model"] != "gemini-3.8-flash" {
 		t.Fatalf("model = %v", payload["model"])
 	}
 	choices, _ := payload["choices"].([]any)
@@ -610,7 +610,7 @@ func TestChatCompletionsDoesNotDuplicateCumulativeText(t *testing.T) {
 		}
 	}
 
-	payload := h.ask(t, "gemini-flash", nil)
+	payload := h.ask(t, "gemini-3.8-flash", nil)
 	choices, _ := payload["choices"].([]any)
 	choice, _ := choices[0].(map[string]any)
 	message, _ := choice["message"].(map[string]any)
@@ -628,7 +628,7 @@ func TestChatCompletionsSeparatesReasoning(t *testing.T) {
 		return [][]any{turnPayload("答案是 42", "先想一下", true)}
 	}
 
-	payload := h.ask(t, "gemini-flash-thinking", nil)
+	payload := h.ask(t, "gemini-3.8-flash-thinking", nil)
 	choices, _ := payload["choices"].([]any)
 	choice, _ := choices[0].(map[string]any)
 	message, _ := choice["message"].(map[string]any)
@@ -651,7 +651,7 @@ func TestChatCompletionsStreamsSSE(t *testing.T) {
 	}
 
 	raw, _ := json.Marshal(map[string]any{
-		"model":    "gemini-flash",
+		"model":    "gemini-3.8-flash",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 		"stream":   true,
 	})
@@ -731,7 +731,7 @@ func TestChatCompletionsFailsOverToHealthyAccount(t *testing.T) {
 		return [][]any{turnPayload("换号成功", "", true)}
 	}
 
-	payload := h.ask(t, "gemini-flash", nil)
+	payload := h.ask(t, "gemini-3.8-flash", nil)
 	choices, _ := payload["choices"].([]any)
 	choice, _ := choices[0].(map[string]any)
 	message, _ := choice["message"].(map[string]any)
@@ -765,7 +765,7 @@ func TestChatCompletionsCoolsDownOnUsageLimit(t *testing.T) {
 		return [][]any{turnPayload("备用号接上了", "", true)}
 	}
 
-	payload := h.ask(t, "gemini-flash", nil)
+	payload := h.ask(t, "gemini-3.8-flash", nil)
 	choices, _ := payload["choices"].([]any)
 	if len(choices) != 1 {
 		t.Fatalf("choices = %v", choices)
@@ -794,7 +794,7 @@ func TestChatCompletionsRetriesOnceOnStaleBuildLabel(t *testing.T) {
 	// The stub cannot change its answer mid-flight, so instead assert the
 	// retry happened: two generation attempts and two shell fetches.
 	rec := h.chat(t, map[string]any{
-		"model":    "gemini-flash",
+		"model":    "gemini-3.8-flash",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	}, h.key)
 	if rec.Code != http.StatusBadGateway {
@@ -811,7 +811,7 @@ func TestChatCompletionsRetriesOnceOnStaleBuildLabel(t *testing.T) {
 func TestChatCompletionsReportsNoAccount(t *testing.T) {
 	h := newHarness(t)
 	rec := h.chat(t, map[string]any{
-		"model":    "gemini-flash",
+		"model":    "gemini-3.8-flash",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	}, h.key)
 
@@ -832,7 +832,7 @@ func TestChatCompletionsRecordsAudit(t *testing.T) {
 		return [][]any{turnPayload("审计", "", true)}
 	}
 
-	h.ask(t, "gemini-flash", nil)
+	h.ask(t, "gemini-3.8-flash", nil)
 
 	audits := h.store.ListAudits()
 	if len(audits) != 1 {
@@ -842,7 +842,7 @@ func TestChatCompletionsRecordsAudit(t *testing.T) {
 	if audit.Status != http.StatusOK {
 		t.Fatalf("audit status = %d", audit.Status)
 	}
-	if audit.Model != "gemini-flash" {
+	if audit.Model != "gemini-3.8-flash" {
 		t.Fatalf("audit model = %q", audit.Model)
 	}
 	if audit.AccountName != "primary" {
@@ -860,7 +860,7 @@ func TestChatCompletionsAuditsFailures(t *testing.T) {
 	h.upstream.generateStatus = http.StatusBadGateway
 
 	rec := h.chat(t, map[string]any{
-		"model":    "gemini-flash",
+		"model":    "gemini-3.8-flash",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	}, h.key)
 	if rec.Code != http.StatusBadGateway {
@@ -889,7 +889,7 @@ func TestChatCompletionsEnforcesRateLimit(t *testing.T) {
 		t.Fatalf("create limited key: %v", err)
 	}
 
-	body := map[string]any{"model": "gemini-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	body := map[string]any{"model": "gemini-3.8-flash", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 	if rec := h.chat(t, body, limited.Key); rec.Code != http.StatusOK {
 		t.Fatalf("first call status = %d", rec.Code)
 	}
@@ -936,7 +936,7 @@ func TestModelsEndpoint(t *testing.T) {
 	}
 	// Every listed model must be one the client can actually resolve, or the
 	// catalogue is advertising something that will fail when used.
-	for _, want := range []string{"gemini-flash", "gemini-flash-thinking", "gemini-pro", "gemini-flash-lite"} {
+	for _, want := range []string{"gemini-3.8-flash", "gemini-3.8-flash-thinking", "gemini-3.1-pro", "gemini-3.5-flash-lite"} {
 		if !ids[want] {
 			t.Fatalf("model list is missing %s: %v", want, ids)
 		}
@@ -1051,7 +1051,7 @@ func TestChatCompletionsRejectsInlineImageWithoutPublicBaseURL(t *testing.T) {
 	}
 
 	rec := h.chat(t, map[string]any{
-		"model": "gemini-flash",
+		"model": "gemini-3.8-flash",
 		"messages": []any{map[string]any{
 			"role": "user",
 			"content": []any{
@@ -1083,7 +1083,7 @@ func TestChatCompletionsForwardsRemoteImage(t *testing.T) {
 	}
 
 	rec := h.chat(t, map[string]any{
-		"model": "gemini-flash",
+		"model": "gemini-3.8-flash",
 		"messages": []any{map[string]any{
 			"role": "user",
 			"content": []any{

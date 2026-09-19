@@ -295,8 +295,8 @@ func BuiltinModels() []*ModelConfig {
 	return out
 }
 
-// modelDisplayName turns `gemini-flash-lite-advanced` into
-// `Gemini Flash Lite Advanced`. The ids are the only source of truth for the
+// modelDisplayName turns `gemini-3.8-flash-thinking` into
+// `Gemini 3.8 Flash Thinking`. The ids are the only source of truth for the
 // name, so deriving it keeps the console in step with the catalogue.
 func modelDisplayName(id string) string {
 	parts := strings.Split(id, "-")

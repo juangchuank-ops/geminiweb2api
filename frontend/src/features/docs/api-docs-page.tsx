@@ -29,7 +29,7 @@ const ENDPOINTS: EndpointDoc[] = [
   -H "Authorization: Bearer sk-gm-xxxx" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gemini-flash",
+    "model": "gemini-3.8-flash",
     "stream": true,
     "reasoning_effort": "high",
     "messages": [
@@ -44,7 +44,7 @@ data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"delta":
 
 data: [DONE]`,
     parameters: [
-      { name: "model", type: "string", required: true, note: "模型 ID 或别名，完整清单见 /v1/models。留空或写了未知名称则回落到 gemini-flash" },
+      { name: "model", type: "string", required: true, note: "模型 ID 或别名，完整清单见 /v1/models。留空或写了未知名称则回落到 gemini-3.8-flash" },
       { name: "messages", type: "array", required: true, note: "OpenAI 标准消息数组，支持 text 与 image_url 多模态内容" },
       { name: "stream", type: "boolean", note: "是否使用 SSE 流式输出，默认 false" },
       {
@@ -68,12 +68,13 @@ data: [DONE]`,
     response: `{
   "object": "list",
   "data": [
-    { "id": "gemini-flash", "object": "model", "owned_by": "gemini" },
-    { "id": "gemini-flash-thinking", "object": "model", "owned_by": "gemini" },
-    { "id": "gemini-pro", "object": "model", "owned_by": "gemini" },
+    { "id": "gemini-3.8-flash", "object": "model", "owned_by": "gemini" },
+    { "id": "gemini-3.8-flash-thinking", "object": "model", "owned_by": "gemini" },
+    { "id": "gemini-3.1-pro", "object": "model", "owned_by": "gemini" },
     { "id": "gemini-auto", "object": "model", "owned_by": "gemini" },
-    { "id": "gemini-flash-thinking-lite", "object": "model", "owned_by": "gemini" },
-    { "id": "gemini-flash-lite", "object": "model", "owned_by": "gemini" }
+    { "id": "gemini-3.8-flash-thinking-lite", "object": "model", "owned_by": "gemini" },
+    { "id": "gemini-3.5-flash-lite", "object": "model", "owned_by": "gemini" },
+    { "id": "gemini-3.6-flash", "object": "model", "owned_by": "gemini" }
   ]
 }`,
     parameters: [],

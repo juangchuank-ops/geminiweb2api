@@ -134,7 +134,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   -H "Authorization: Bearer sk-gm-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-flash",
+    "model": "gemini-3.8-flash",
     "messages": [{"role": "user", "content": "你好"}],
     "stream": true
   }'
@@ -144,30 +144,33 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## 模型映射
 
-模型目录**由客户端目录派生**（`internal/gemini/models.go` 的 `builtinModels`），管理台的模型列表直接从它生成，不存在两份列表漂移的可能。
+模型目录（`internal/gemini/models.go` 的 `builtinModels`）**以用户看得见的营销名为主键**，管理台的模型列表直接从它生成，不存在两份列表漂移的可能。
 
-| 模型 ID | 上游 mode | 档位 | 说明 |
+| 模型 ID | 上游 mode | hex id | 说明 |
 | --- | --- | --- | --- |
-| `gemini-flash` | 1 | basic | Flash，默认模型，速度与质量均衡 |
-| `gemini-flash-thinking` | 2 | basic | Flash 思考模式，输出最长（约 2 万字），适合难题 |
-| `gemini-pro` | 3 | basic | Pro，基础档推理模型 |
-| `gemini-auto` | 4 | basic | Auto，由上游按问题难度自动选档 |
-| `gemini-flash-thinking-lite` | 5 | basic | Flash 动态思考，按需决定思考深度 |
-| `gemini-flash-lite` | 6 | basic | Flash Lite，最快最省 |
-| `gemini-flash-plus` | 1 | plus | 同上，但**要求账号本身是 Plus 订阅** |
-| `gemini-pro-plus` | 3 | plus | 同上 |
-| `gemini-flash-lite-plus` | 6 | plus | 同上 |
-| `gemini-flash-advanced` | 1 | advanced | 同上，要求 Advanced 订阅 |
-| `gemini-pro-advanced` | 3 | advanced | 同上 |
-| `gemini-flash-lite-advanced` | 6 | advanced | 同上 |
+| `gemini-3.8-flash` | 1 | `56fdd199312815e2` | **默认模型**。网页端当前的 Flash，速度与质量均衡 |
+| `gemini-3.8-flash-thinking` | 2 | 不发头 | 3.8 Flash 思考模式，输出最长（约 2 万字），适合难题 |
+| `gemini-3.1-pro` | 3 | `e6fa609c3fa255c0` | 3.1 Pro，需要账号有 Pro/Ultra 订阅 |
+| `gemini-auto` | 4 | 不发头 | 由上游按问题难度自动选档 |
+| `gemini-3.8-flash-thinking-lite` | 5 | 不发头 | 3.8 Flash 动态思考，按需决定思考深度 |
+| `gemini-3.5-flash-lite` | 6 | `cf41b0e0dd7d53e5` | 最快最省；免费号被降级时落到的就是它 |
+| `gemini-3.6-flash` | 1 | `fbb127bbb056c959` | 上一代 Flash，留着是因为旧客户端会写死这个名字 |
 
-`plus` / `advanced` 那几项存在的原因是：**档位是对账号的一个声明**。账号是 Plus，就必须声明自己是 Plus 才能被路由到 Plus 的容量；账号不是却声明了，会被上游按 `1052` 拒绝。所以这些模型是给「你确定自己的号是什么档位」时用的。
+**为什么主键必须是营销名。** 2api 面对的是「模型」那一栏由人照着模型列表填进去的客户端。名字如果写成 `gemini-flash` 这种自造的档位描述，`/v1/models` 就会列出一堆没人会去请求的字符串——对读它的人来说和空目录没有区别。所以目录里挂的是 `gemini-3.8-flash` 这种官方名；而这个项目早期用过的名字（`gemini-flash`、`gemini-flash-plus`…）全部降级成 `aliasModels` 里的别名，仍然可用。
+
+**hex id 认的是模型，不是档位。** 这一点曾经搞反过：`56fdd199312815e2`（3.7/3.8 Flash）被当成某个模型的「Plus」「Advanced」变体列了三遍，而模型自己那一项挂的 hex 是 `fbb127bbb056c959`——那是 **3.6** Flash。结果就是**默认模型指向上一代**，当前那一代藏在一个人人都会以为要付费才能用的名字后面。档位后缀是虚构的，那几项其实是更新的模型被归错了档。
+
+**同一个 hex 可以出现在两个 mode 下**（3.8 Flash 和它的思考模式），但**不能只靠 capacity 区分**——那正是上面那个错误的形状。`models_test.go` 里两条测试分别钉住这两点。
+
+**Google 会原地升级模型。** 3.7 Flash 变成 3.8 Flash 时 hex 没变，所以 hex 不等于版本号；`gemini-3.7-flash` 因此是别名而不是目录里的第二项。
+
+别名：`gemini-2.5-pro`、`gpt-4o`、`deepseek-reasoner` 之类的常见写法都有映射，见 `aliasModels`。客户端指定了目录里没有的模型名时，会回落到 `upstream.defaultModel`（默认 `gemini-3.8-flash`）——直接拒绝会让所有硬编码模型名的客户端一起报错，而它们大多数都这么干。
 
 > **思考深度可以不换模型就调。** 请求里带 `reasoning_effort`：`none` / `minimal` / `low` 表示用模型自带的档位，其余任何取值（`medium`、`high`……）都强制最深的思考模式。
 >
 > 推理内容会被自动分离到 `reasoning_content`，不会混进正文——这是按 payload 字段分流的，不依赖上游的事件编号。
 
-别名：`gemini-2.5-pro`、`gemini-2.5-flash`、`deepseek-reasoner` 之类的常见写法都有映射，见 `aliasModels`。客户端指定了目录里没有的模型名时，会回落到 `upstream.defaultModel`（默认 `gemini-flash`）——直接拒绝会让所有硬编码模型名的客户端一起报错，而它们大多数都这么干。
+hex id 的归属来自两个独立逆向实现的交叉验证（[yeahhe365/Gemini-Nexus](https://github.com/yeahhe365/gemini-nexus) 的模型目录变更记录、[zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go) 的版本历史，以及 [zhiyu1998/Gemi2Api-Server](https://github.com/zhiyu1998/Gemi2Api-Server) 里原样透传的抓包请求头）。这些 id 是不透明的，Google 会轮换——所以它们是**数据**，轮换时改配置而不是改代码。
 
 ---
 
@@ -280,8 +283,8 @@ at={at}&f.req={urlencode(JSON.stringify(payload))}
 x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,null,<capacity>,null,null,<mode 编号>]
 ```
 
-- `<hex>` 是该模型的内部 id（如 `gemini-flash` 是 `fbb127bbb056c959`）
-- `<capacity>` 是档位：basic `1`、plus `2`、advanced `4`
+- `<hex>` 是该模型的内部 id（如 `gemini-3.8-flash` 是 `56fdd199312815e2`）
+- `<capacity>` 是模型在网页端自带的档位值：`1` 是免费档被服务的那些（3.6 Flash、3.5 Flash-Lite），`2` 是需要订阅的那些（3.8 Flash、3.1 Pro）。**它是模型的属性，不是调用方能表达的选择**，所以目录里每个模型只有一个值，没有「同一模型 × 三档」的排列
 - `<mode 编号>` 必须和 payload 槽位 `79` 一致
 
 对不上时的报错：
@@ -289,9 +292,9 @@ x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,
 | 代码 | 含义 |
 | --- | --- |
 | `1050` | 编号和请求头互相矛盾 |
-| `1052` | 账号没有这个档位的权限 |
+| `1052` | 模型头声明与 payload 对不上，或账号的订阅撑不起所选模型 |
 
-> **`gemini-flash-thinking` / `gemini-auto` / `gemini-flash-thinking-lite` 没有 hex id**，所以走的是退化路径：**不发模型头，只按 mode 编号路由**。这是刻意的——猜一个 id 只会换来 `1052`，而不发头能让这些模式真的可用。
+> **`gemini-3.8-flash-thinking` / `gemini-auto` / `gemini-3.8-flash-thinking-lite` 没有 hex id**，所以走的是退化路径：**不发模型头，只按 mode 编号路由**。这是刻意的——猜一个 id 只会换来 `1052`，而不发头能让这些模式真的可用。思考模式尤其如此：有实现声称它和 3.8 Flash 共用同一个 hex，但那条路没有抓包佐证，而不发头是验证过能用的。
 
 ### 流式解析
 
@@ -349,7 +352,7 @@ x-goog-ext-525001261-jspb: [1,null,null,null,"<hex>",null,null,0,[4,5,6,8],null,
 | `1016` | 未认证 | Cookie 已不是会话 → `invalid` |
 | `1037` | 配额用尽 | 冷却 |
 | `1050` | 编号与请求头不一致 | 配置错误 |
-| `1052` | 账号无此档位权限 | 换模型或换号 |
+| `1052` | 模型头与 payload 对不上，或账号订阅撑不起所选模型 | 换模型或换号 |
 | `1060` | 地区受限 | 需要代理 |
 
 另有 HTTP `405` = build label 过期（重拉 `/app` 后重试）。
@@ -698,15 +701,15 @@ location / {
 
 **Q：`1050` / `1052` 是什么？**
 
-模型编号和请求头说的不是同一件事（`1050`），或者账号没有这个档位的权限（`1052`）。常见于给非 Plus 账号选了 `gemini-pro-plus` 之类的模型。换个 basic 档位的模型即可。
+模型编号和请求头说的不是同一件事（`1050`），或者账号的订阅撑不起所选的模型（`1052`）。免费号选 `gemini-3.1-pro` 容易撞上这条——上游有时不是报错而是**静默降级**，所以「明明选了 Pro，回来看是 Flash 的味儿」也属于这一类。
 
 **Q：HTTP 405？**
 
 build label 过期了。适配器会自动重拉 `/app` 并重试一次；如果持续 405，检查上游地址是否被改到了非预期的地方。
 
-**Q：模型列表里有些模型看起来是重复的（比如三个 `gemini-flash` 变体）？**
+**Q：我之前一直用 `gemini-flash`，升级后要改客户端吗？**
 
-它们档位不同（basic / plus / advanced）。档位是对账号的声明，不是模型的能力差异——详见「模型映射」。
+不用。项目早期公布的这些名字（`gemini-flash`、`gemini-flash-plus`、`gemini-pro`…）现在都是别名，仍然解析得到，只是指向的模型变成了对应的当前版本（`gemini-flash` → `gemini-3.8-flash`）。`/v1/models` 里列的是新的营销名——客户端如果是从接口拉列表再让人选，会看到新名字。
 
 **Q：日志里出现 `1037` 配额用尽？**
 

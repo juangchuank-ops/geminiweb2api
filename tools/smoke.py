@@ -118,12 +118,12 @@ def main():
     status, payload = call(base, "/admin/api/models", token=token)
     check("GET /admin/models returns 200", status == 200)
     model_ids = {item["id"] for item in payload.get("items", [])}
-    for expected in ("gemini-flash", "gemini-flash-thinking", "gemini-pro", "gemini-flash-lite"):
+    for expected in ("gemini-3.8-flash", "gemini-3.8-flash-thinking", "gemini-3.1-pro", "gemini-3.5-flash-lite"):
         check(f"catalogue contains {expected}", expected in model_ids)
 
     status, payload = call(base, "/v1/models", token=key)
     check("GET /v1/models returns 200", status == 200, f"status={status}")
-    check("GET /v1/models lists gemini-flash", any(item["id"] == "gemini-flash" for item in payload.get("data", [])))
+    check("GET /v1/models lists gemini-3.8-flash", any(item["id"] == "gemini-3.8-flash" for item in payload.get("data", [])))
 
     status, _ = call(base, "/v1/models")
     check("GET /v1/models requires a key", status == 401, f"status={status}")
@@ -270,7 +270,7 @@ def main():
     else:
         print("\n8. gateway (expected to fail without a valid Gemini cookie)")
         status, payload = call(base, "/v1/chat/completions", "POST",
-                               {"model": "gemini-flash", "messages": [{"role": "user", "content": "hi"}]},
+                               {"model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "hi"}]},
                                key, timeout=180)
         check("chat completions answers with an HTTP status", status in (200, 400, 429, 502), f"status={status}")
         if status == 400:
