@@ -1,0 +1,34 @@
+# Build output
+/geminiweb2api
+/geminiweb2api.exe
+/geminiweb2api.exe~
+/frontend/dist/
+*.tsbuildinfo
+
+# Runtime state: the account pool, client keys and audit log all live here.
+# Committing it would leak live tokens.
+/data/
+
+# Render-check screenshots
+/render-out/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Agent scratch space (holds machine-local paths and notes)
+.workbuddy-ai/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
